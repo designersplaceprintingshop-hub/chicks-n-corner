@@ -43,6 +43,63 @@ function printWindow(title,body){let w=window.open('','_blank');if(!w)return toa
 function printCustomerOrder(id){let x=db.sales.find(s=>s.id===id);if(!x)return;let rows=x.items.map(i=>`<tr><td>${i.qty} × ${esc(i.name)}${i.option?`<br><small>${esc(optionLabel(i.option))}</small>`:''}</td><td>${peso(i.price*i.qty)}</td></tr>`).join('');printWindow(x.orderNo||'Customer Order',`<h1>CHICKS N’ CORNER</h1><small>${esc(x.orderNo||'Order')} • ${new Date(x.ts).toLocaleString()}</small><p>Customer: <b>${esc(x.customer||'Walk-in')}</b><br>Payment: <b>${esc(x.payment||'Cash')}</b></p><table><thead><tr><th>Order</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table><div class="total">TOTAL: ${peso(x.total)}</div><p style="text-align:center;margin-top:24px">Thank you!</p>`)}
 function printDailyOrders(){let t=db.sales.filter(x=>x.date===today()),sales=t.reduce((a,x)=>a+x.total,0),food=t.reduce((a,x)=>a+x.foodCost,0),ex=expensesIn(1).reduce((a,x)=>a+x.amount,0),pur=purchasesIn(1).reduce((a,x)=>a+x.cost,0),net=sales-food-ex-pur;let rows=t.map(x=>`<tr><td>${esc(x.orderNo||'')}</td><td>${esc(x.customer||'Walk-in')}</td><td>${x.items.map(i=>`${i.qty}× ${esc(i.name)}${i.option?' ('+esc(optionLabel(i.option))+')':''}`).join('<br>')}</td><td>${peso(x.total)}</td></tr>`).join('')||'<tr><td colspan="4">No orders today.</td></tr>';printWindow('Daily Orders '+today(),`<h1>CHICKS N’ CORNER</h1><h2>Daily Orders Report</h2><small>${today()}</small><table><thead><tr><th>Order #</th><th>Customer</th><th>Items</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><div class="private"><b>BUSINESS COPY</b><br>Total orders: ${t.length}<br>Gross sales: <b>${peso(sales)}</b><br>Food cost: ${peso(food)}<br>Other expenses: ${peso(ex)}<br>Purchases: ${peso(pur)}<br>Net profit: <b>${peso(net)}</b></div>`)}
 
+function clearIngredientForm(){
+  document.getElementById('ingId').value='';
+  document.getElementById('ingName').value='';
+  document.getElementById('ingCategory').value='Chicken & Marinade';
+  document.getElementById('ingPack').value='';
+  document.getElementById('ingUnit').value='g';
+  document.getElementById('ingPrice').value='';
+  document.getElementById('ingStock').value='';
+  document.getElementById('ingLow').value='0';
+  document.getElementById('ingPortion').value='0';
+  let b=document.querySelector('#costing button[onclick="saveIngredient()"]'); if(b)b.textContent='SAVE INGREDIENT';
+}
+function editIng(id){
+  let i=db.ingredients.find(x=>x.id===id); if(!i)return toast('Ingredient not found');
+  document.getElementById('ingId').value=i.id;
+  document.getElementById('ingName').value=i.name||'';
+  document.getElementById('ingCategory').value=inferCategory(i);
+  document.getElementById('ingPack').value=Number(i.pack||0);
+  document.getElementById('ingUnit').value=i.unit||'g';
+  document.getElementById('ingPrice').value=Number(i.price||0);
+  document.getElementById('ingStock').value=Number(i.stock||0);
+  document.getElementById('ingLow').value=Number(i.low||0);
+  document.getElementById('ingPortion').value=Number(i.portion||0);
+  let b=document.querySelector('#costing button[onclick="saveIngredient()"]'); if(b)b.textContent='UPDATE INGREDIENT';
+  document.getElementById('costing').scrollIntoView({behavior:'smooth',block:'start'});
+  setTimeout(()=>document.getElementById('ingName').focus(),250);
+}
+function saveIngredient(){
+  let id=document.getElementById('ingId').value;
+  let name=document.getElementById('ingName').value.trim();
+  let category=document.getElementById('ingCategory').value;
+  let pack=Number(document.getElementById('ingPack').value);
+  let unit=document.getElementById('ingUnit').value;
+  let price=Number(document.getElementById('ingPrice').value);
+  let stock=Number(document.getElementById('ingStock').value||0);
+  let low=Number(document.getElementById('ingLow').value||0);
+  let portion=Number(document.getElementById('ingPortion').value||0);
+  if(!name)return toast('Enter ingredient name');
+  if(!(pack>0))return toast('Purchase quantity must be greater than 0');
+  if(price<0||!Number.isFinite(price))return toast('Enter a valid purchase price');
+  if(!Number.isFinite(stock)||!Number.isFinite(low)||!Number.isFinite(portion))return toast('Check ingredient quantities');
+  if(id){
+    let i=db.ingredients.find(x=>x.id===id); if(!i)return toast('Ingredient not found');
+    Object.assign(i,{name,category,pack,unit,price,stock,low,portion});
+  }else{
+    db.ingredients.push({id:'ing_'+uid(),name,category,pack,unit,price,stock,low,portion});
+  }
+  save(); clearIngredientForm(); renderAll(); toast(id?'Ingredient updated':'Ingredient saved');
+}
+function delIng(id){
+  let i=db.ingredients.find(x=>x.id===id); if(!i)return;
+  let usedRecipe=Object.values(db.recipes||{}).some(lines=>(lines||[]).some(r=>r.ing===id));
+  let usedFlavor=(db.flavors||[]).some(f=>f.ingredientId===id);
+  if(usedRecipe||usedFlavor)return alert('This ingredient is being used in a recipe or drink flavor. Remove it there first before deleting.');
+  if(!confirm('Delete '+i.name+'?'))return;
+  db.ingredients=db.ingredients.filter(x=>x.id!==id); save(); renderAll(); toast('Ingredient deleted');
+}
 function renderIngredients(){if(!db.ingredients.length){ingredientList.innerHTML='No ingredients.';return}ingredientList.innerHTML=CATEGORIES.map(cat=>{let items=db.ingredients.filter(i=>inferCategory(i)===cat);if(!items.length)return '';return `<div style="margin:16px 0 8px"><h3 style="margin:0 0 8px">${cat}</h3>${items.map(i=>`<div class="item"><div class="itemtop"><div><b>${i.name}</b><br><small>${peso(i.price)} / ${i.pack} ${i.unit} = <b>${peso(costPer(i))}/${i.unit}</b>${i.portion?` • per order: ${i.portion} ${i.unit}`:''}</small></div><div><button class="btn light" onclick="editIng('${i.id}')">Edit</button> <button class="btn red" onclick="delIng('${i.id}')">×</button></div></div></div>`).join('')}</div>`}).join('')}
 function renderRecipeSelectors(){let val=recipeMenu.value;recipeMenu.innerHTML=db.menu.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');if(val&&db.menu.some(x=>x.id===val))recipeMenu.value=val;let opts=db.ingredients.slice().sort((a,b)=>CATEGORIES.indexOf(inferCategory(a))-CATEGORIES.indexOf(inferCategory(b))||a.name.localeCompare(b.name)).map(i=>`<option value="${i.id}">${inferCategory(i)} — ${i.name} (${i.unit})</option>`).join('');recipeIng.innerHTML=opts;purchaseIng.innerHTML=opts;renderRecipe()}
 function renderRecipe(){let mid=recipeMenu.value;if(!mid)return;let lines=db.recipes[mid]||[];recipeLines.innerHTML=lines.map((r,n)=>{let i=db.ingredients.find(x=>x.id===r.ing);return i?`<div class="item itemtop"><span>${i.name}: ${r.qty} ${i.unit} = ${peso(costPer(i)*r.qty)}</span><button class="btn red" onclick="removeRecipe(${n})">×</button></div>`:''}).join('')||'<p class="muted">No recipe ingredients yet.</p>';let m=db.menu.find(x=>x.id===mid),c=recipeCost(mid);recipeTotal.innerHTML=`Food cost: <b>${peso(c)}</b> • Selling: <b>${peso(m.price)}</b> • Gross profit: <b>${peso(m.price-c)}</b> • Cost %: <b>${m.price?(c/m.price*100).toFixed(1):0}%</b>`} function addRecipeLine(){let mid=recipeMenu.value,ing=recipeIng.value,qty=Number(recipeQty.value);if(!ing||qty<=0)return toast('Select ingredient and quantity');db.recipes[mid]=db.recipes[mid]||[];let old=db.recipes[mid].find(x=>x.ing===ing);if(old)old.qty=qty;else db.recipes[mid].push({ing,qty});recipeQty.value='';save();renderAll();toast('Recipe updated')} function removeRecipe(n){db.recipes[recipeMenu.value].splice(n,1);save();renderAll()}
